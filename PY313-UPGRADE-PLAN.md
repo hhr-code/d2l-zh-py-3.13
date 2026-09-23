@@ -1,7 +1,7 @@
 # d2l-zh 升级到 Python 3.13 —— 工作清单
 
 > 目标场景：本仓库的 notebook 能在 **Google Colab（真机实测 Python 3.13.15）** 上原样跑通，且 `pip install` 不产生依赖冲突。
-> 状态：L1 调研已完成；**L2 依赖层已动手（`setup.py` 已改）**；L3/L4/L5 待做。
+> 状态：L1 调研已完成；**L2 依赖层已落地（`setup.py` 已改）**；**PyTorch 首个 notebook 已在 Colab 3.13.15 端到端跑绿**；L3 其余章节 / L4 / L5 待做。
 
 ---
 
@@ -9,10 +9,11 @@
 
 | 批次 | 内容 | 状态 |
 |---|---|---|
-| Batch 0 | 固化基线 | ✅ Colab = Python 3.13.15（老马真机确认） |
+| Batch 0 | 固化基线 | ✅ Colab = Python 3.13.15（老马真机确认）+ 预装包版本已采（见 §1.4 证据 6） |
 | Batch 1 | `setup.py` 依赖下界 + `python_requires` | ✅ **已实施**（含一次回归修复），见 §1.4 |
-| Batch 2.3 | PyTorch tab 语义层核对 | 🟡 **部分**：`d2l.torch` smoke 7/7 通过；notebook 级逐章验证未做 |
-| Batch 3.1/3.3/3.4 | d2lbook / Colab 安装 URL / 安装文档 | ⬜ 待做 |
+| Batch 2.3 | PyTorch tab 语义层核对 | 🟡 **部分**：`d2l.torch` smoke 7/7 通过；**`linear-regression-scratch` 整本 notebook 已在 Colab 3.13.15 端到端跑绿**；其余章节未做 |
+| Batch 3.1/3.3 | d2lbook / Colab 安装 URL | 🟡 **3.3 已改**：`config.ini [colab] libs` 指向本 fork；3.1 未动 |
+| Batch 3.4 | 安装文档（`chapter_installation/index.md` 仍写 `python=3.9`） | ⬜ 待做 |
 | Batch 4 | 3.13 门禁 | ⬜ 待做 |
 
 **本次范围（老马 2026-09-23 拍板）**：第一批只做 PyTorch；MXNet 冻结不参与。
@@ -25,9 +26,9 @@
 !pip install "git+https://github.com/hhr-code/d2l-zh-py-3.13@release"
 ```
 
-- `release` 分支已创建，当前与 `master` 同一 commit（`d43c84e7`）。按官方 d2l-zh 的约定，`release` 是**发布指针**：日常在 `master` 开发，要「发布」给 Colab 用时再把它快进到目标 commit。
+- `release` 分支已创建，与 `master` 保持同一 commit。按官方 d2l-zh 的约定，`release` 是**发布指针**：日常在 `master` 开发，要「发布」给 Colab 用时再把它快进到目标 commit。
 - 临时试最新改动也可以直接用 `@master`。
-- ⚠️ `config.ini` 的 `[colab] libs` / `[sagemaker]` 里仍硬编码着上游 URL（`d2l-ai/d2l-zh@release`）——那正是生成 Colab notebook 安装 cell 的地方，**尚未改**，见 Batch 3.3。
+- ✅ `config.ini` 的 `[colab] libs` **已改**：pytorch / tensorflow / paddle 三行的 d2l 安装源都指向本 fork；mxnet 一行保持上游（DEFECT-001 冻结，改了也无用）。`[sagemaker]` 用的是相对路径 `..`，不需要改。
 
 ---
 
@@ -105,18 +106,33 @@
 > 而 `d2l` 实际只用到 `display.display` / `display.clear_output` / `set_matplotlib_formats`——**都是 IPython 1.x 时代的 API，压根不需要下界**。这就是「D3：不要收紧宿主环境」这条原则反噬到自己的案例：下界写宽了是破坏，写窄了同样是破坏。
 > 教训：**对纯 Python 包，除非能给出有依据、且确认宿主环境必然满足的下界，否则不要写。**
 >
-> **⏳ 待定性（未验证，勿当结论）**：`pip` 报告的是**安装后环境里的全部冲突**，不限于本次改动引入的那一个。因此这条消息有两种可能：
-> - (a) Colab 原装 ipython 是 7.34.0，被我们升级 → 我们引入的；
-> - (b) Colab 原装 ipython 已是 9.x，`google-colab 1.0.0` 这条 `ipython==7.34.0` 的 pin 本来就处于不满足状态（Colab 元数据陈旧）→ 与本次安装无关，装任何包都会报。
+> **✅ 已定性（2026-09-23，Colab 真机 CDP 实测）——结论是 (a)，即我们引入的。**
 >
-> 两者都会打印「but you have ipython 9.17.1」，光看这条消息**无法区分**。判定方法：**重启 Colab 运行时（不要装任何东西）**，跑
+> 判定不靠「重启运行时」的对照实验，而是直接在活的 Colab runtime 里读证据（临时单元格，跑完即删）：
 > ```python
-> import IPython; print("ipython", IPython.__version__)
-> !pip check
+> import importlib.metadata as md, IPython
+> md.version("ipython")            # → 9.17.1     （磁盘上装着的）
+> IPython.__version__              # → 7.34.0     （内存里加载着的）
+> IPython.__file__                 # → /usr/local/lib/python3.13/dist-packages/IPython/__init__.py
+> md.distribution("d2l").metadata.get_all("Requires-Dist")
+> # → numpy>=2.1 / matplotlib>=3.9.2 / matplotlib-inline>=0.1.7 / requests>=2.32
+> #   pandas>=2.2.3 / ipython>=8.28 / pillow>=10.4     ← 注意这一行
 > ```
-> 若 `pip check` 在干净运行时**已经**报这条冲突 → 情况 (b)，属于 Colab 自身的元数据问题，**无法由我们消除**；若干净运行时不报、装完 d2l 才报 → 情况 (a)，即本 commit 修掉的问题。
+> 三条事实拼起来，(a) 成立：
+> 1. 该运行时里**磁盘上的 d2l 元数据是旧提交**的（`ipython>=8.28`），说明这台 VM 上的 d2l 是我第一版有界安装留下来的；
+> 2. 磁盘上 ipython 只有**一个** dist-info：`ipython-9.17.1.dist-info` → 9.17.1 确实被装上去了；
+> 3. `IPython.__version__` 却是 7.34.0 —— 因为 **kernel 进程启动早于这次升级**，`sys.modules` 里仍是启动时加载的那份 7.34.0。`importlib.metadata` 读磁盘，`__version__` 读内存，所以同一台机器给出两个答案。
 >
-> 不论 (a) 还是 (b)，**本次去掉纯 py 包下界都是正确的**——它消除了「因为 d2l 而升级宿主包」这一可能性。
+> 修复后的 `@release` 不会再发生，实测：
+> ```
+> $ pip install --dry-run --report r.json "git+…/d2l-zh-py-3.13@release"
+> rc = 0
+> 将安装: (无)          是否包含 ipython: False
+> ```
+> 且发布产物元数据里是裸 `Requires-Dist: ipython`（见下方「验证证据」§2）——按 pip 语义**任何已装版本都满足**，因此 d2l 不可能再去动宿主 ipython。
+>
+> ⚠️ 遗留提示：这台 runtime 的**磁盘**已被污染（ipython 9.17.1）。重启 kernel **不回滚磁盘**，`pip check` 仍会报那条冲突。要得到干净基线只能 `运行时 → 断开连接并删除运行时`（换一台 VM），然后重跑安装 cell。这件事与本 fork 的代码无关。
+
 
 > ⚠️ **回归教训 1（已修复，见 commit `b54d4e`）**：把 `jupyter` 移出主依赖时，`IPython` 断了——它原先是通过 `jupyter → notebook → IPython` 这条**隐式链路**带进来的，移走后 `from d2l import torch` 立刻 `ModuleNotFoundError: No module named 'IPython'`。
 > 这个回归是**本机 torch smoke 测出来的**，不是读代码看出来的。结论：动依赖声明后必须跑一次真实 import + 调用，静态检查发现不了隐式依赖链路断裂。
@@ -158,6 +174,37 @@ $ pip check                    →  No broken requirements found.
 > 注 2：在**全新环境**里 pip 会把 pandas 解析到 **3.0.6**——pandas 3.0 的 CoW / str dtype 行为变更因此对全新安装是「活的」，见 Batch 2.2。Colab 上若已预装 pandas 2.x，则会被保留（下界 `>=2.2.3` 满足），不受影响。
 > 注 3：构建残留 `build/` 会让二次 `pip wheel` 报 `[Errno 17] File exists: 'build/bdist.*/wheel/d2l-2.0.0.dist-info'`，重新构建前先 `rm -rf build d2l.egg-info`。
 
+**验证证据（Colab 真机 Python 3.13.15，2026-09-23）**
+
+通过 CDP（`127.0.0.1:9222`）驱动老马已打开的
+`colab.research.google.com/github/d2l-ai/d2l-zh-pytorch-colab/.../linear-regression-scratch.ipynb`，
+在活页面上插入临时单元格并真实执行（`colab.global.notebook.commandHandler.executeCellCommand`），跑完即删。
+
+```
+# 5) 整本 notebook 端到端（31 cells）—— 全链路真实执行，输出非仓库里的陈旧快照
+cell 1  !pip install -q "git+…/d2l-zh-py-3.13@release"   → Building wheel for d2l … done
+cell 2  !python3 --version                               → Python 3.13.15
+cell 4  from d2l import torch as d2l                     → OK
+cell 9  features/labels                                  → tensor([1.4632, 0.5511]) / tensor([5.2498])
+cell 15 data_iter 首批样本                               → 真实张量
+cell 26 训练循环                                         → epoch 1 loss 0.042790 / epoch 3 loss 0.000051
+cell 28 参数估计误差                                     → w: tensor([-1.3804e-04, 5.7936e-05])
+
+# 6) 运行时实况（新增临时单元格打印）
+Python: 3.13.15
+d2l: 2.0.0 | /usr/local/lib/python3.13/dist-packages/d2l/__init__.py
+torch: 2.11.0+cpu | torchvision: 0.26.0+cpu
+numpy: 2.1.3 | pandas: 2.2.3 | matplotlib: 3.10.0 | pillow: 11.3.0
+IPython: 7.34.0 | requests: 2.32.4        ← 内存里；磁盘上已被旧提交升到 9.17.1，见 §1.4
+CUDA: False
+d2l.arange/reshape → (3, 4)   d2l.matmul → (3, 3)
+d2l.set_figsize + d2l.plt.scatter / Timer / Accumulator / synthetic_data  → 全部 True
+```
+
+**这一条是 D3 策略最有力的实证**：Colab 预装的 numpy 2.1.3 / pandas 2.2.3 / matplotlib 3.10.0 /
+pillow 11.3.0 / torch 2.11.0+cpu，装完 d2l 后**一个都没被升级**。原因就是 §1.4 那条规则 1：
+字面下界（`numpy>=2.1` 等）在 3.13 上恒真，既表达了真实最低要求，又不可能触发升级。
+
 ---
 
 ## 2. 完整工作清单
@@ -166,12 +213,20 @@ $ pip check                    →  No broken requirements found.
 
 - [x] **0.1 目标运行时版本** ✅ **Colab = Python 3.13.15**（老马真机确认，2026-09-23）。
       ~~（此前根据第三方引用的 Google past-runtime 2026.07 快照推测为 3.12.13，作废。）~~
-      仍需补记的是 Colab 3.13 runtime **预装的 numpy / torch / pandas / matplotlib 具体版本**——它决定我们的下界是否真的「已满足、不触发升级」：
-  ```python
-  import sys, platform, numpy, torch, pandas, matplotlib
-  print(sys.version, platform.platform())
-  for m in (numpy, torch, pandas, matplotlib): print(m.__name__, m.__version__)
-  ```
+- [x] **0.1b Colab 3.13 runtime 预装包版本** ✅ **已采集**（2026-09-23，真机 CDP 实测，见 §1.4 证据 6）。
+      这一条决定我们的下界是否真的「已满足、不触发升级」：
+
+      | 包 | Colab 预装 | 我们的下界 | 是否触发升级 |
+      |---|---|---|---|
+      | numpy | 2.1.3 | `>=2.1` | ❌ 不触发（已满足） |
+      | pandas | 2.2.3 | `>=2.2.3` | ❌ 不触发 |
+      | matplotlib | 3.10.0 | `>=3.9.2` | ❌ 不触发 |
+      | pillow | 11.3.0 | `>=10.4` | ❌ 不触发 |
+      | torch | 2.11.0+cpu / torchvision 0.26.0+cpu | 不声明（用户自装） | ❌ 不触碰 |
+      | requests | 2.32.4 | 裸名 | ❌ 不触碰 |
+      | ipython | 原装应为 7.34.0 | 裸名 | ❌ 不触碰 |
+
+      ⚠️ `pandas 2.2.3` 这个数字值得记住：下界 `>=2.2.3` 恰好压线满足，所以 Colab 上**不会**被升到 pandas 3.x——Batch 2.2 里那些 pandas 3 行为变更在 Colab 路径上是「不激活」的。本机全新 venv 里会解析到 3.0.6，两条路径行为可能不同。
 - [ ] **0.2 明确验收定义**（建议写进 README/INFO.md）：
   - Colab 上 `pip install git+https://github.com/<fork>@<branch>` 成功，且 `pip check` 干净
   - Colab 上 `torch` tab 的 notebook 可执行、无 ImportError
@@ -235,6 +290,11 @@ $ pip check                    →  No broken requirements found.
       `set_figsize`+`plt` / 3 步 SGD 训练循环 / `Accumulator`，跑在 torch 2.14.0 +
       numpy 2.5.3 + matplotlib 3.11.2 + Python 3.13.12 上。
       140 个顶层符号里，「线性网络 / MLP / 基础训练工具」这一层已经覆盖。
+- [x] **notebook 级端到端（首个）** ✅ **`chapter_linear-networks/linear-regression-scratch.ipynb` 整本在 Colab Python 3.13.15 上跑绿**
+      （2026-09-23 真机 CDP 驱动，见 §1.4 证据 5）：pip 装 wheel 成功 → `from d2l import torch as d2l` → 生成数据 → 小批量迭代 →
+      3 epoch 训练收敛（loss 0.042790 → 0.000051）→ 参数估计误差 `1.38e-04`。
+      这一条把「L2 装得上」推进到了「L3 跑得对」，但**只覆盖了线性回归从零实现这一章**，其余 116 个含代码文件仍未验。
+- [ ] **其余章节 notebook 逐章在 Colab 上跑**（最高价值的下一批；覆盖面见 Batch 4 G5）
 - [ ] **`torch.load` 默认 `weights_only=True`（torch 2.6+）**：实测仓库有 **5 处** 调用
       （`chapter_deep-learning-computation/read-write.md` 4 处、`natural-language-inference-bert.md` 1 处）。
       存的是 Tensor / Tensor 列表 / dict / state_dict，**预计兼容，但必须逐处实跑确认**（smoke 未覆盖）。
@@ -280,10 +340,11 @@ $ pip check                    →  No broken requirements found.
 
 **3.3 Colab / SageMaker 集成**
 
-- [ ] `config.ini [colab] libs` 的 4 条 `git+https://github.com/d2l-ai/d2l-zh@release`
-- [ ] `config.ini [colab]` 的 mxnet 分支 `-U mxnet-cu101==1.7.0`（随 D1 处理）
+- [x] ✅ **已改** `config.ini [colab] libs`：pytorch / tensorflow / paddle 三行的 d2l 安装源 → `git+https://github.com/hhr-code/d2l-zh-py-3.13@release`；mxnet 一行保持上游（D1 冻结）。改动上方加了一段说明注释。
+- [ ] `config.ini [colab]` 的 mxnet 分支 `-U mxnet-cu101==1.7.0`（随 D1 处理，当前保持不动）
 - [ ] `config.ini [sagemaker] kernel` 里的 `conda_mxnet_p36` / `conda_pytorch_p36` 等已不存在的 kernel 名
 - [ ] 下游 4 个 Colab 仓库（`d2l-zh-colab` / `-pytorch-colab` / `-tensorflow-colab` / `-paddle-colab`）的 notebook 副本需同步重新生成
+      —— 注意 `[colab] github_repo` 仍指向上游 `d2l-ai/*`：本 fork 尚未发布自己的 Colab 镜像仓库，所以**改的是安装源、不是镜像仓库本身**。老马当前是在上游 notebook 里手改安装 cell 来测的。
 - [ ] 每个 notebook 顶部的安装 cell（对应 Colab 仓库），确保不降级 Colab 预装包
 
 **3.4 文档**
@@ -299,8 +360,9 @@ $ pip check                    →  No broken requirements found.
 - [ ] **G2 安装门禁**：干净 py3.13 venv `pip install -e .` → `pip check` 干净 → `python -c "from d2l import torch; ..."`
 - [ ] **G3 构建门禁**：3.13 容器里 `d2lbook build outputcheck tabcheck`
 - [ ] **G4 全量 eval 门禁**：`d2lbook build eval --tab pytorch`（成本最高：INFO.md 记载单 notebook 限制 20min，共 117 个含代码的 md）
-- [ ] **G5 Colab 冒烟**：在真实 Colab runtime 上跑基线脚本 + 前 3 章 notebook
+- [x] **G5 Colab 冒烟**：⚠️ **手工/半自动版已跑**（2026-09-23，CDP 驱动真机，1 个 notebook）；**未固化成可复跑门禁**
 - [ ] **G6 依赖冲突门禁**：Colab 里 `pip check`，专门防 D3 那个坑
+      —— 注意这条门禁在一个「已经被污染的 runtime」上会一直红（见 §1.4 结论），所以它必须在**干净的**运行时里跑，或改成断言「本次 pip 计划里不含宿主包」而不是断言 `pip check` 全绿。
 
 ---
 
