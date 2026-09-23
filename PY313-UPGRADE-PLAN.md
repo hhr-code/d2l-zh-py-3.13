@@ -104,6 +104,19 @@
 > ```
 > 而 `d2l` 实际只用到 `display.display` / `display.clear_output` / `set_matplotlib_formats`——**都是 IPython 1.x 时代的 API，压根不需要下界**。这就是「D3：不要收紧宿主环境」这条原则反噬到自己的案例：下界写宽了是破坏，写窄了同样是破坏。
 > 教训：**对纯 Python 包，除非能给出有依据、且确认宿主环境必然满足的下界，否则不要写。**
+>
+> **⏳ 待定性（未验证，勿当结论）**：`pip` 报告的是**安装后环境里的全部冲突**，不限于本次改动引入的那一个。因此这条消息有两种可能：
+> - (a) Colab 原装 ipython 是 7.34.0，被我们升级 → 我们引入的；
+> - (b) Colab 原装 ipython 已是 9.x，`google-colab 1.0.0` 这条 `ipython==7.34.0` 的 pin 本来就处于不满足状态（Colab 元数据陈旧）→ 与本次安装无关，装任何包都会报。
+>
+> 两者都会打印「but you have ipython 9.17.1」，光看这条消息**无法区分**。判定方法：**重启 Colab 运行时（不要装任何东西）**，跑
+> ```python
+> import IPython; print("ipython", IPython.__version__)
+> !pip check
+> ```
+> 若 `pip check` 在干净运行时**已经**报这条冲突 → 情况 (b)，属于 Colab 自身的元数据问题，**无法由我们消除**；若干净运行时不报、装完 d2l 才报 → 情况 (a)，即本 commit 修掉的问题。
+>
+> 不论 (a) 还是 (b)，**本次去掉纯 py 包下界都是正确的**——它消除了「因为 d2l 而升级宿主包」这一可能性。
 
 > ⚠️ **回归教训 1（已修复，见 commit `b54d4e`）**：把 `jupyter` 移出主依赖时，`IPython` 断了——它原先是通过 `jupyter → notebook → IPython` 这条**隐式链路**带进来的，移走后 `from d2l import torch` 立刻 `ModuleNotFoundError: No module named 'IPython'`。
 > 这个回归是**本机 torch smoke 测出来的**，不是读代码看出来的。结论：动依赖声明后必须跑一次真实 import + 调用，静态检查发现不了隐式依赖链路断裂。
