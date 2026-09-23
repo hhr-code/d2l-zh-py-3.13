@@ -205,6 +205,33 @@ d2l.set_figsize + d2l.plt.scatter / Timer / Accumulator / synthetic_data  → �
 pillow 11.3.0 / torch 2.11.0+cpu，装完 d2l 后**一个都没被升级**。原因就是 §1.4 那条规则 1：
 字面下界（`numpy>=2.1` 等）在 3.13 上恒真，既表达了真实最低要求，又不可能触发升级。
 
+```
+# 7) 从 GitHub 拉刚 push 的 @release，构建产物并读它的真实元数据（在 Colab 上跑）
+$ pip wheel --no-deps -w /tmp/whl git+…/d2l-zh-py-3.13@release      → rc = 0
+产物: d2l-2.0.0-py3-none-any.whl
+    Name: d2l
+    Version: 2.0.0
+    Requires-Python: >=3.13
+    Requires-Dist: numpy>=2.1
+    Requires-Dist: matplotlib>=3.9.2
+    Requires-Dist: pandas>=2.2.3
+    Requires-Dist: pillow>=10.4
+    Requires-Dist: requests
+    Requires-Dist: ipython          ← 裸名，无下界（旧提交这里是 ipython>=8.28）
+    Requires-Dist: matplotlib-inline
+    Provides-Extra: notebook
+    Requires-Dist: jupyter; extra == "notebook"
+
+# 用该产物刷新运行时里的 d2l（--no-deps，不碰别的包）
+$ pip install --no-deps --force-reinstall --report … d2l-2.0.0-py3-none-any.whl
+    → 安装清单: ['d2l==2.0.0']        ← 只有 d2l 一个
+$ pip check
+    → google-colab 1.0.0 has requirement ipython==7.34.0, but you have ipython 9.17.1.
+       （仅此一条；来自被污染的磁盘，见 §1.4 结论）
+```
+
+> 这张表是**发布产物**（从 GitHub 拉取、在 Colab 上构建）的真实元数据，不是本地推演——所以「d2l 不会再动宿主 ipython」这条结论有实物依据。
+
 ---
 
 ## 2. 完整工作清单
