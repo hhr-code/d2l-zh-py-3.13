@@ -17,6 +17,18 @@
 
 **本次范围（老马 2026-09-23 拍板）**：第一批只做 PyTorch；MXNet 冻结不参与。
 
+### 在 Colab 上安装本 fork
+
+官方文档/notebook 里的 `git+https://github.com/d2l-ai/d2l-zh@release` 指向的是**上游仓库**，不包含本次修复，必须换成自己的 fork：
+
+```python
+!pip install "git+https://github.com/hhr-code/d2l-zh-py-3.13@release"
+```
+
+- `release` 分支已创建，当前与 `master` 同一 commit（`d43c84e7`）。按官方 d2l-zh 的约定，`release` 是**发布指针**：日常在 `master` 开发，要「发布」给 Colab 用时再把它快进到目标 commit。
+- 临时试最新改动也可以直接用 `@master`。
+- ⚠️ `config.ini` 的 `[colab] libs` / `[sagemaker]` 里仍硬编码着上游 URL（`d2l-ai/d2l-zh@release`）——那正是生成 Colab notebook 安装 cell 的地方，**尚未改**，见 Batch 3.3。
+
 ---
 
 ## 0. 结论先行
@@ -70,13 +82,30 @@
 | `numpy` | `==1.21.5` | `>=2.1` | 2.1.0 首个带 cp313 wheel |
 | `matplotlib` | `==3.5.1` | `>=3.9.2` | 3.9.2 首个带 cp313 wheel |
 | `pandas` | `==1.2.4` | `>=2.2.3` | 2.2.3 首个带 cp313 wheel |
-| `requests` | `==2.25.1` | `>=2.32` | 纯 py，但 2.25 系列的 urllib3 组合过老 |
+| `requests` | `==2.25.1` | `requests`（**无下界**） | 纯 py；给下界只会升级宿主环境，收益为零 |
 | `jupyter` | `==1.0.0`（主依赖） | 移入 `extras_require['notebook']` | jupyter 是运行环境而非库依赖；留主依赖会促使 pip 解析/升级 notebook、jupyterlab，有打坏宿主环境（Colab）的风险 |
-| `matplotlib-inline` | **缺失** | `>=0.1.7` | `d2l/*.py` 用 `backend_inline` 画图 |
-| `ipython` | **缺失** | `>=8.28` | `d2l/*.py` 用 `IPython.display` |
+| `matplotlib-inline` | **缺失** | `matplotlib-inline`（**无下界**） | `d2l/*.py` 用 `backend_inline`；纯 py，同 requests |
+| `ipython` | **缺失** | `ipython`（**无下界**） | `d2l/*.py` 只用 `display.display` / `display.clear_output`，IPython 1.x 就有；纯 py，同 requests |
 | `pillow` | **缺失** | `>=10.4` | `d2l/torch.py`、`paddle.py` 用 `PIL.Image`；10.4.0 首个带 cp313 wheel |
 
-> ⚠️ **回归教训（已修复，见 commit `b54d4e`）**：把 `jupyter` 移出主依赖时，`IPython` 断了——它原先是通过 `jupyter → notebook → IPython` 这条**隐式链路**带进来的，移走后 `from d2l import torch` 立刻 `ModuleNotFoundError: No module named 'IPython'`。
+#### 依赖下界的两条规则（重要）
+
+判断「该不该写版本下界」的标准只有一个：**这个下界会不会触发对宿主环境的升级**。
+
+| 类别 | 例子 | 怎么写下界 | 为什么 |
+|---|---|---|---|
+| **有 C 扩展、按 CPython ABI 发 wheel** | `numpy` `matplotlib` `pandas` `pillow` | 写下界，取「首个带 cp313 wheel 的版本」 | 在 Python 3.13 上这个下界**恒真**（更老的版本没有 cp313 wheel，装不上）→ 既表达了真实最低要求，又**不可能**触发升级 |
+| **纯 Python 包** | `requests` `ipython` `matplotlib-inline` | **不写**（裸包名） | 写下界＝凭空制造一个真实约束，只会把宿主环境的包升级掉。裸包名的语义正是我们要的：**已装即满足、就不动它**；只有完全缺失时才装最新版 |
+
+> ⚠️ **回归教训 2（已修复）——D3 原则被自己违反**：第二版曾写 `ipython>=8.28`（当时就标注「取不到精确支持版本线，是估的」）。结果在真实 Colab 上把预装的 **ipython 7.34.0 升级成 9.17.1**，触发：
+> ```
+> ERROR: pip's dependency resolver ... google-colab 1.0.0 requires ipython==7.34.0,
+>        but you have ipython 9.17.1 which is incompatible.
+> ```
+> 而 `d2l` 实际只用到 `display.display` / `display.clear_output` / `set_matplotlib_formats`——**都是 IPython 1.x 时代的 API，压根不需要下界**。这就是「D3：不要收紧宿主环境」这条原则反噬到自己的案例：下界写宽了是破坏，写窄了同样是破坏。
+> 教训：**对纯 Python 包，除非能给出有依据、且确认宿主环境必然满足的下界，否则不要写。**
+
+> ⚠️ **回归教训 1（已修复，见 commit `b54d4e`）**：把 `jupyter` 移出主依赖时，`IPython` 断了——它原先是通过 `jupyter → notebook → IPython` 这条**隐式链路**带进来的，移走后 `from d2l import torch` 立刻 `ModuleNotFoundError: No module named 'IPython'`。
 > 这个回归是**本机 torch smoke 测出来的**，不是读代码看出来的。结论：动依赖声明后必须跑一次真实 import + 调用，静态检查发现不了隐式依赖链路断裂。
 
 **验证证据（本机 Python 3.13.12）**
@@ -89,13 +118,13 @@ $ pip wheel --no-deps .        →  d2l-2.0.0-py3-none-any.whl 构建成功
 Requires-Python: >=3.13
 Requires-Dist: numpy>=2.1
 Requires-Dist: matplotlib>=3.9.2
-Requires-Dist: matplotlib-inline>=0.1.7
-Requires-Dist: requests>=2.32
 Requires-Dist: pandas>=2.2.3
-Requires-Dist: ipython>=8.28
 Requires-Dist: pillow>=10.4
+Requires-Dist: requests
+Requires-Dist: ipython
+Requires-Dist: matplotlib-inline
 Provides-Extra: notebook
-Requires-Dist: jupyter>=1.1; extra == "notebook"
+Requires-Dist: jupyter; extra == "notebook"
 
 # 3) 干净 venv 完整安装（模拟 Colab）
 $ pip install <wheel>          →  d2l 2.0.0 + numpy 2.5.3 + matplotlib 3.11.2
